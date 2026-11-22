@@ -40,30 +40,54 @@ public class HttpJsonSource : IWallpaperSource
         if (hasApiKey && requestUri.Scheme != Uri.UriSchemeHttps)
             throw new InvalidOperationException("API keys may only be sent to HTTPS endpoints.");
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
-        if (hasApiKey && !request.Headers.TryAddWithoutValidation(_config.ApiKeyHeader, _apiKey))
-            throw new InvalidOperationException("The configured API-key header is invalid.");
+        Uri currentUri = requestUri;
+        HttpResponseMessage response;
+        for (int redirects = 0; ; redirects++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, currentUri);
+            if (hasApiKey && !request.Headers.TryAddWithoutValidation(_config.ApiKeyHeader, _apiKey))
+                throw new InvalidOperationException("The configured API-key header is invalid.");
 
-        // The application supplies a no-redirect client for authenticated requests. This
-        // prevents custom API-key headers from being forwarded to a redirect destination.
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
-            .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+            response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
+                .ConfigureAwait(false);
 
-        if (response.Content.Headers.ContentLength is long length && length > MaxJsonResponseBytes)
-            throw new InvalidOperationException($"JSON response exceeds the {MaxJsonResponseBytes}-byte limit.");
+            if ((int)response.StatusCode is >= 300 and < 400)
+            {
+                Uri? location = response.Headers.Location is { } redirect
+                    ? new Uri(currentUri, redirect)
+                    : null;
+                response.Dispose();
+                if (location is null || redirects >= 5)
+                    throw new InvalidOperationException("Source returned an invalid or excessive redirect chain.");
+                if (location.Scheme is not (Uri.UriSchemeHttp or Uri.UriSchemeHttps))
+                    throw new InvalidOperationException("Redirect target must use HTTP or HTTPS.");
+                if (hasApiKey && (location.Scheme != Uri.UriSchemeHttps
+                    || !string.Equals(location.Authority, requestUri.Authority, StringComparison.OrdinalIgnoreCase)))
+                    throw new InvalidOperationException("An authenticated source cannot redirect to a different origin.");
+                currentUri = location;
+                continue;
+            }
+            break;
+        }
 
-        string json = await ReadLimitedAsync(response.Content, ct).ConfigureAwait(false);
-        using var document = JsonDocument.Parse(json);
+        using (response)
+        {
+            response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength is long length && length > MaxJsonResponseBytes)
+                throw new InvalidOperationException($"JSON response exceeds the {MaxJsonResponseBytes}-byte limit.");
 
-        string? imageUrl = Navigate(document.RootElement, _config.ImageUrlJsonPath).GetString();
-        if (string.IsNullOrWhiteSpace(imageUrl))
-            throw new InvalidOperationException($"JSON path '{_config.ImageUrlJsonPath}': empty URL.");
+            string json = await ReadLimitedAsync(response.Content, ct).ConfigureAwait(false);
+            using var document = JsonDocument.Parse(json);
 
-        var resolved = new Uri(requestUri, imageUrl);
-        if (resolved.Scheme is not (Uri.UriSchemeHttp or Uri.UriSchemeHttps))
-            throw new InvalidOperationException("Image URL must use HTTP or HTTPS.");
-        return resolved;
+            string? imageUrl = Navigate(document.RootElement, _config.ImageUrlJsonPath).GetString();
+            if (string.IsNullOrWhiteSpace(imageUrl))
+                throw new InvalidOperationException($"JSON path '{_config.ImageUrlJsonPath}': empty URL.");
+
+            var resolved = new Uri(currentUri, imageUrl);
+            if (resolved.Scheme is not (Uri.UriSchemeHttp or Uri.UriSchemeHttps))
+                throw new InvalidOperationException("Image URL must use HTTP or HTTPS.");
+            return resolved;
+        }
     }
 
     private static async Task<string> ReadLimitedAsync(HttpContent content, CancellationToken ct)
