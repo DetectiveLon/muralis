@@ -1,56 +1,90 @@
+using System.IO;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using Muralis.Models;
 
 namespace Muralis.Services.Sources;
 
 /// <summary>
-/// Implémentation générique d'<see cref="IWallpaperSource"/> pour toute API qui renvoie du JSON
-/// contenant une URL d'image : GET sur <see cref="WallpaperSourceConfig.RequestUrl"/> (+ en-tête
-/// de clé API éventuel), extraction via un chemin JSON simple (<c>images[0].url</c>, <c>[0].file_url</c>,
-/// <c>urls.full</c>…). Les URLs relatives sont résolues contre l'URL de requête (cas Bing).
+/// Generic JSON wallpaper source. Responses are streamed and capped before parsing so a
+/// misconfigured endpoint cannot allocate unbounded memory.
 /// </summary>
 public class HttpJsonSource : IWallpaperSource
 {
+    internal const int MaxJsonResponseBytes = 2 * 1024 * 1024;
+
     private readonly HttpClient _http;
     private readonly WallpaperSourceConfig _config;
     private readonly string _apiKey;
 
-    /// <param name="apiKey">Clé effective à envoyer (résolue par l'appelant : magasin
-    /// central pour un preset connu, clé d'instance pour une source personnalisée).
-    /// Null/vide : repli sur la clé de l'instance.</param>
+    /// <param name="apiKey">Decrypted key resolved by the caller. Keys are never read from
+    /// the persisted source model as plaintext.</param>
     public HttpJsonSource(HttpClient http, WallpaperSourceConfig config, string? apiKey = null)
     {
         _http = http;
         _config = config;
-        _apiKey = string.IsNullOrWhiteSpace(apiKey) ? config.ApiKey : apiKey;
+        _apiKey = apiKey ?? string.Empty;
     }
 
     public string Name => _config.Name;
 
     public async Task<Uri> GetImageUrlAsync(CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, _config.RequestUrl);
-        if (!string.IsNullOrWhiteSpace(_config.ApiKeyHeader) && !string.IsNullOrWhiteSpace(_apiKey))
-            request.Headers.TryAddWithoutValidation(_config.ApiKeyHeader, _apiKey);
+        if (!Uri.TryCreate(_config.RequestUrl, UriKind.Absolute, out var requestUri)
+            || requestUri.Scheme is not (Uri.UriSchemeHttp or Uri.UriSchemeHttps))
+            throw new InvalidOperationException("Source URL must use HTTP or HTTPS.");
 
-        using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+        bool hasApiKey = !string.IsNullOrWhiteSpace(_config.ApiKeyHeader)
+            && !string.IsNullOrWhiteSpace(_apiKey);
+        if (hasApiKey && requestUri.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidOperationException("API keys may only be sent to HTTPS endpoints.");
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        if (hasApiKey && !request.Headers.TryAddWithoutValidation(_config.ApiKeyHeader, _apiKey))
+            throw new InvalidOperationException("The configured API-key header is invalid.");
+
+        // The application supplies a no-redirect client for authenticated requests. This
+        // prevents custom API-key headers from being forwarded to a redirect destination.
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
+            .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        string json = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        if (response.Content.Headers.ContentLength is long length && length > MaxJsonResponseBytes)
+            throw new InvalidOperationException($"JSON response exceeds the {MaxJsonResponseBytes}-byte limit.");
+
+        string json = await ReadLimitedAsync(response.Content, ct).ConfigureAwait(false);
         using var document = JsonDocument.Parse(json);
 
         string? imageUrl = Navigate(document.RootElement, _config.ImageUrlJsonPath).GetString();
         if (string.IsNullOrWhiteSpace(imageUrl))
             throw new InvalidOperationException($"JSON path '{_config.ImageUrlJsonPath}': empty URL.");
 
-        // Uri(base, relative) laisse une URL absolue inchangée.
-        return new Uri(new Uri(_config.RequestUrl), imageUrl);
+        var resolved = new Uri(requestUri, imageUrl);
+        if (resolved.Scheme is not (Uri.UriSchemeHttp or Uri.UriSchemeHttps))
+            throw new InvalidOperationException("Image URL must use HTTP or HTTPS.");
+        return resolved;
+    }
+
+    private static async Task<string> ReadLimitedAsync(HttpContent content, CancellationToken ct)
+    {
+        await using var input = await content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var output = new MemoryStream();
+        byte[] buffer = new byte[16 * 1024];
+        int read;
+        while ((read = await input.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false)) > 0)
+        {
+            if (output.Length + read > MaxJsonResponseBytes)
+                throw new InvalidOperationException($"JSON response exceeds the {MaxJsonResponseBytes}-byte limit.");
+            await output.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+        }
+
+        return Encoding.UTF8.GetString(output.GetBuffer(), 0, checked((int)output.Length));
     }
 
     /// <summary>
-    /// Navigation JSON minimaliste : segments séparés par des points, index de tableau entre
-    /// crochets. Ex. <c>images[0].url</c>, <c>[0].file_url</c> (racine tableau), <c>urls.full</c>.
+    /// Minimal JSON navigation: dot-separated properties and array indices in brackets.
+    /// Examples: <c>images[0].url</c>, <c>[0].file_url</c>, <c>urls.full</c>.
     /// </summary>
     internal static JsonElement Navigate(JsonElement element, string path)
     {
@@ -72,7 +106,7 @@ public class HttpJsonSource : IWallpaperSource
                 }
 
                 int close = rest.IndexOf(']');
-                if (close < 2 || !int.TryParse(rest[1..close], out int index))
+                if (close < 2 || !int.TryParse(rest[1..close], out int index) || index < 0)
                     throw new InvalidOperationException($"Invalid array index in '{path}'.");
                 if (current.ValueKind != JsonValueKind.Array || index >= current.GetArrayLength())
                     throw new InvalidOperationException($"Index [{index}] out of range (path '{path}').");
