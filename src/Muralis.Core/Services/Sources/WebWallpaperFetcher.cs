@@ -37,6 +37,7 @@ public class WebWallpaperFetcher
     private static readonly TimeSpan WallhavenPageLifetime = TimeSpan.FromHours(1);
 
     private readonly HttpClient _http;
+    private readonly HttpClient _sourceHttp;
     private readonly ConfigService _configService;
     private readonly ISecretProtector _secrets;
     private readonly string _cacheRoot;
@@ -59,9 +60,10 @@ public class WebWallpaperFetcher
     /// doit pas pouvoir remplir la mémoire ou le disque).</summary>
     internal const long MaxImageBytes = 50L * 1024 * 1024;
 
-    public WebWallpaperFetcher(HttpClient http, ConfigService configService, ISecretProtector secrets)
+    public WebWallpaperFetcher(HttpClient http, ConfigService configService, ISecretProtector secrets, HttpClient? sourceHttp = null)
     {
         _http = http;
+        _sourceHttp = sourceHttp ?? http;
         _configService = configService;
         _secrets = secrets;
         _cacheRoot = Path.Combine(configService.DataDirectory, "webcache");
@@ -86,7 +88,7 @@ public class WebWallpaperFetcher
         {
             Uri imageUrl = source is { IsWallhaven: true, Wallhaven: not null }
                 ? await NextWallhavenImageAsync(source, monitor, ct).ConfigureAwait(false)
-                : await new HttpJsonSource(_http, source, ResolveApiKey(source)).GetImageUrlAsync(ct).ConfigureAwait(false);
+                : await new HttpJsonSource(_sourceHttp, source, ResolveApiKey(source)).GetImageUrlAsync(ct).ConfigureAwait(false);
 
             string? path = await DownloadAsync(source.Id, imageUrl, ct).ConfigureAwait(false);
             return path is null
