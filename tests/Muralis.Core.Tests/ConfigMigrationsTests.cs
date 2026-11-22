@@ -85,6 +85,28 @@ public class ConfigMigrationsTests
     }
 
     [Fact]
+    public void V4_CustomSourceKey_MovesIntoEncryptedPerSourceStore()
+    {
+        var source = new WallpaperSourceConfig
+        {
+            Id = "custom-1",
+            PresetId = WallpaperSourceConfig.CustomPresetId,
+            Name = "Custom",
+            RequestUrl = "https://example.test/api",
+            ImageUrlJsonPath = "url",
+            ApiKeyHeader = "X-API-Key",
+            ApiKey = "private-key",
+        };
+        var config = new AppConfig { Version = 3, Sources = [source] };
+
+        Assert.True(ConfigMigrations.Apply(config, Fakes.Secrets));
+
+        Assert.Equal(AppConfig.CurrentVersion, config.Version);
+        Assert.Equal(string.Empty, source.ApiKey);
+        Assert.Equal("private-key", Fakes.Secrets.Unprotect(config.ApiKeys["custom-1"]));
+    }
+
+    [Fact]
     public void Apply_IsIdempotent()
     {
         var config = LegacyV1();

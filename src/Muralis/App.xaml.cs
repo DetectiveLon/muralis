@@ -74,7 +74,7 @@ public partial class App : Application
         var secrets = new DpapiSecretProtector();
         _secrets = secrets;
         var composer = new WallpaperComposer(configService);
-        _wallpaperService = new WallpaperService(composer, _desktop);
+        _wallpaperService = new WallpaperService(composer, _desktop, shouldDefer: () => configService.Load().PauseDuringFullscreen && FullscreenDetector.IsFullscreenAppInForeground());
 
         // Client HTTP partagé des sources web. User-Agent explicite : certaines API
         // (e621 notamment) rejettent les clients sans identification.
@@ -86,7 +86,18 @@ public partial class App : Application
         };
         var version = typeof(App).Assembly.GetName().Version;
         http.DefaultRequestHeaders.UserAgent.ParseAdd($"Muralis/{version?.ToString(3) ?? "1.0"} (+https://github.com/aetherishq/muralis)");
-        var fetcher = new WebWallpaperFetcher(http, configService, secrets);
+        // Authenticated JSON requests disable automatic redirects. HttpJsonSource follows
+        // only safe same-origin redirects so custom API-key headers cannot leak cross-origin.
+        var sourceHttp = new HttpClient(new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            AllowAutoRedirect = false,
+        })
+        {
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+        sourceHttp.DefaultRequestHeaders.UserAgent.ParseAdd($"Muralis/{version?.ToString(3) ?? "1.0"} (+https://github.com/aetherishq/muralis)");
+        var fetcher = new WebWallpaperFetcher(http, configService, secrets, sourceHttp);
 
         // Réglage lu à chaque pose prévue : pris en compte à chaud (#41). Ticks des
         // diaporamas postés sur l'UI thread (appels COM, événements vers l'UI).
@@ -174,7 +185,7 @@ public partial class App : Application
         // L'ancien graphe (bascule de langue) se désabonne des services, qui survivent (#49).
         _settingsViewModel?.Dispose();
         var appSettings = new AppSettingsViewModel(_configService!, _themeService!, _secrets!, () => _settingsWindow, ApplyLanguage);
-        var sources = new SourcesViewModel(_configService!);
+        var sources = new SourcesViewModel(_configService!, _secrets!);
         _settingsViewModel = new SettingsViewModel(_configService!, _desktop!, _wallpaperService!, _slideshowService!, _imageSaveService!, appSettings, sources);
     }
 

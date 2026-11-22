@@ -28,15 +28,20 @@ public partial class SourcesViewModel : ObservableObject
     }
 
     private readonly ConfigService _configService;
+    private readonly ISecretProtector _secrets;
 
-    public SourcesViewModel(ConfigService configService)
+    public SourcesViewModel(ConfigService configService, ISecretProtector secrets)
     {
         _configService = configService;
+        _secrets = secrets;
 
         EditorRandomOptions.Add(new SourceOption(SlideshowService.LocalFolderSourceType, ScreenSettingsViewModel.LocalFolderOption));
         EditorDailyOptions.Add(new SourceOption(ScreenConfig.LocalFileSourceType, ScreenSettingsViewModel.LocalFileOption));
-        foreach (var source in configService.Load().Sources)
+        var loadedConfig = configService.Load();
+        foreach (var source in loadedConfig.Sources)
         {
+            if (loadedConfig.ApiKeys.TryGetValue(source.Id, out string? encryptedKey))
+                source.ApiKey = _secrets.Unprotect(encryptedKey) ?? string.Empty;
             Sources.Add(source);
             OptionsFor(source.Kind).Add(new SourceOption(source.Id, source.Name));
         }
@@ -131,7 +136,7 @@ public partial class SourcesViewModel : ObservableObject
             ApiKey = CustomApiKey.Trim(),
         };
 
-        if (!source.IsValid)
+        if (!source.IsValid || HasInsecureApiKey(source))
         {
             StatusMessage = Strings.Status_CustomInvalid;
             return;
@@ -158,7 +163,7 @@ public partial class SourcesViewModel : ObservableObject
     private void Update(WallpaperSourceConfig source)
     {
         source.Name = source.Name.Trim();
-        if (!source.IsValid)
+        if (!source.IsValid || HasInsecureApiKey(source))
         {
             StatusMessage = Strings.Status_UpdateInvalid;
             return;
@@ -172,9 +177,10 @@ public partial class SourcesViewModel : ObservableObject
         var config = _configService.Load();
         int persisted = config.Sources.FindIndex(s => s.Id == source.Id);
         if (persisted >= 0)
-            config.Sources[persisted] = source;
+            config.Sources[persisted] = PersistedCopy(source);
         else
-            config.Sources.Add(source);
+            config.Sources.Add(PersistedCopy(source));
+        PersistApiKey(config, source);
         _configService.Save(config);
 
         var option = OptionsFor(source.Kind).FirstOrDefault(o => o.Id == source.Id);
@@ -226,6 +232,7 @@ public partial class SourcesViewModel : ObservableObject
 
         var config = _configService.Load();
         config.Sources.RemoveAll(s => s.Id == source.Id);
+        config.ApiKeys.Remove(source.Id);
         _configService.Save(config);
 
         StatusMessage = string.Format(Strings.Status_RemovedFormat, source.Name);
@@ -238,10 +245,37 @@ public partial class SourcesViewModel : ObservableObject
         OptionsFor(source.Kind).Add(new SourceOption(source.Id, source.Name));
 
         var config = _configService.Load();
-        config.Sources.Add(source);
+        config.Sources.Add(PersistedCopy(source));
+        PersistApiKey(config, source);
         _configService.Save(config);
 
         StatusMessage = string.Format(Strings.Status_AddedFormat, source.Name);
+    }
+
+    private static bool HasInsecureApiKey(WallpaperSourceConfig source) =>
+        !string.IsNullOrWhiteSpace(source.ApiKey)
+        && Uri.TryCreate(source.RequestUrl, UriKind.Absolute, out var uri)
+        && uri.Scheme != Uri.UriSchemeHttps;
+
+    private static WallpaperSourceConfig PersistedCopy(WallpaperSourceConfig source) => new()
+    {
+        Id = source.Id,
+        PresetId = source.PresetId,
+        Name = source.Name,
+        Kind = source.Kind,
+        RequestUrl = source.RequestUrl,
+        ImageUrlJsonPath = source.ImageUrlJsonPath,
+        ApiKeyHeader = source.ApiKeyHeader,
+        ApiKey = string.Empty,
+        Wallhaven = source.Wallhaven?.Clone(),
+    };
+
+    private void PersistApiKey(AppConfig config, WallpaperSourceConfig source)
+    {
+        if (string.IsNullOrWhiteSpace(source.ApiKey))
+            config.ApiKeys.Remove(source.Id);
+        else
+            config.ApiKeys[source.Id] = _secrets.Protect(source.ApiKey.Trim());
     }
 
     /// <summary>Collection d'options d'éditeur correspondant au type de source.</summary>

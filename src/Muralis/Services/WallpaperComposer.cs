@@ -85,6 +85,13 @@ public class WallpaperComposer : IImageComposer
         {
             var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.IgnoreColorProfile, BitmapCacheOption.OnLoad);
             BitmapSource frame = decoder.Frames[0];
+            const long maxPixels = 50_000_000;
+            const int maxDimension = 32_768;
+            if (frame.PixelWidth <= 0 || frame.PixelHeight <= 0
+                || frame.PixelWidth > maxDimension || frame.PixelHeight > maxDimension
+                || (long)frame.PixelWidth * frame.PixelHeight > maxPixels)
+                throw new InvalidDataException(
+                    $"Image dimensions {frame.PixelWidth}x{frame.PixelHeight} exceed the supported decode limit.");
             frame.Freeze();
             return frame;
         }
