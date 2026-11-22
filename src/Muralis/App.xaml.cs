@@ -80,13 +80,24 @@ public partial class App : Application
         // (e621 notamment) rejettent les clients sans identification.
         // Version réelle + URL du projet (review s3). Connexions renouvelées toutes les 15 min :
         // une app qui tourne des semaines suit les changements DNS des API (review s6).
-        var http = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(15), AllowAutoRedirect = false })
+        var http = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(15) })
         {
             Timeout = TimeSpan.FromSeconds(30),
         };
         var version = typeof(App).Assembly.GetName().Version;
         http.DefaultRequestHeaders.UserAgent.ParseAdd($"Muralis/{version?.ToString(3) ?? "1.0"} (+https://github.com/aetherishq/muralis)");
-        var fetcher = new WebWallpaperFetcher(http, configService, secrets);
+        // Authenticated JSON requests disable automatic redirects. HttpJsonSource follows
+        // only safe same-origin redirects so custom API-key headers cannot leak cross-origin.
+        var sourceHttp = new HttpClient(new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(15),
+            AllowAutoRedirect = false,
+        })
+        {
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+        sourceHttp.DefaultRequestHeaders.UserAgent.ParseAdd($"Muralis/{version?.ToString(3) ?? "1.0"} (+https://github.com/aetherishq/muralis)");
+        var fetcher = new WebWallpaperFetcher(http, configService, secrets, sourceHttp);
 
         // Réglage lu à chaque pose prévue : pris en compte à chaud (#41). Ticks des
         // diaporamas postés sur l'UI thread (appels COM, événements vers l'UI).
