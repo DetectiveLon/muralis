@@ -32,7 +32,7 @@ public class HttpJsonSource : IWallpaperSource
     public async Task<Uri> GetImageUrlAsync(CancellationToken ct)
     {
         if (!Uri.TryCreate(_config.RequestUrl, UriKind.Absolute, out var requestUri)
-            || requestUri.Scheme is not (Uri.UriSchemeHttp or Uri.UriSchemeHttps))
+            || (requestUri.Scheme != Uri.UriSchemeHttp && requestUri.Scheme != Uri.UriSchemeHttps))
             throw new InvalidOperationException("Source URL must use HTTP or HTTPS.");
 
         bool hasApiKey = !string.IsNullOrWhiteSpace(_config.ApiKeyHeader)
@@ -59,7 +59,7 @@ public class HttpJsonSource : IWallpaperSource
                 response.Dispose();
                 if (location is null || redirects >= 5)
                     throw new InvalidOperationException("Source returned an invalid or excessive redirect chain.");
-                if (location.Scheme is not (Uri.UriSchemeHttp or Uri.UriSchemeHttps))
+                if (location.Scheme != Uri.UriSchemeHttp && location.Scheme != Uri.UriSchemeHttps)
                     throw new InvalidOperationException("Redirect target must use HTTP or HTTPS.");
                 if (hasApiKey && (location.Scheme != Uri.UriSchemeHttps
                     || !string.Equals(location.Authority, requestUri.Authority, StringComparison.OrdinalIgnoreCase)))
@@ -84,7 +84,7 @@ public class HttpJsonSource : IWallpaperSource
                 throw new InvalidOperationException($"JSON path '{_config.ImageUrlJsonPath}': empty URL.");
 
             var resolved = new Uri(currentUri, imageUrl);
-            if (resolved.Scheme is not (Uri.UriSchemeHttp or Uri.UriSchemeHttps))
+            if (resolved.Scheme != Uri.UriSchemeHttp && resolved.Scheme != Uri.UriSchemeHttps)
                 throw new InvalidOperationException("Image URL must use HTTP or HTTPS.");
             return resolved;
         }
