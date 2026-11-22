@@ -22,7 +22,7 @@ public sealed class PoseRequest(string? deviceId, string path, DesktopWallpaperP
 /// rafraîchissement perceptible du bureau au lieu d'un par écran (#41). L'exécution reprend
 /// sur le contexte de la première demande (l'UI thread dans l'app : appel COM).
 /// </summary>
-public sealed class PoseBatcher(Action<IReadOnlyList<PoseRequest>> execute, TimeSpan window)
+public sealed class PoseBatcher(Action<IReadOnlyList<PoseRequest>> execute, TimeSpan window, Func<bool>? shouldDefer = null)
 {
     private readonly object _lock = new();
     private List<PoseRequest>? _pending;
@@ -43,6 +43,12 @@ public sealed class PoseBatcher(Action<IReadOnlyList<PoseRequest>> execute, Time
     private async Task FlushLaterAsync()
     {
         await Task.Delay(window);
+
+        // Re-check immediately before the COM batch, not only before download/composition.
+        // If a game became foreground during the 1.5s batching window, keep one pending
+        // batch and retry after the fullscreen detector reports that it has ended.
+        while (shouldDefer?.Invoke() == true)
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
 
         List<PoseRequest> batch;
         lock (_lock)
