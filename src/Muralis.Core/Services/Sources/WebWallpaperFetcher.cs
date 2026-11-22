@@ -343,7 +343,9 @@ public class WebWallpaperFetcher
     private string? ResolveApiKey(WallpaperSourceConfig source)
     {
         if (source.IsCustom)
-            return null;
+            return _configService.Load().ApiKeys.TryGetValue(source.Id, out string? customBlob)
+                ? _secrets.Unprotect(customBlob)
+                : null;
 
         return _configService.Load().ApiKeys.TryGetValue(source.PresetId, out string? blob)
             ? _secrets.Unprotect(blob)
