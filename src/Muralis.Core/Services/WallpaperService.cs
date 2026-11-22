@@ -26,11 +26,11 @@ public class WallpaperService
     private readonly IDesktopBackend _backend;
     private readonly PoseBatcher _batcher;
 
-    public WallpaperService(IImageComposer composer, IDesktopBackend backend, TimeSpan? poseBatchWindow = null)
+    public WallpaperService(IImageComposer composer, IDesktopBackend backend, TimeSpan? poseBatchWindow = null, Func<bool>? shouldDefer = null)
     {
         _composer = composer;
         _backend = backend;
-        _batcher = new PoseBatcher(backend.ApplyPoses, poseBatchWindow ?? PoseBatchWindow);
+        _batcher = new PoseBatcher(backend.ApplyPoses, poseBatchWindow ?? PoseBatchWindow, shouldDefer);
     }
 
     /// <summary>
