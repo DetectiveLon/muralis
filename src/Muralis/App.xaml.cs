@@ -74,7 +74,7 @@ public partial class App : Application
         var secrets = new DpapiSecretProtector();
         _secrets = secrets;
         var composer = new WallpaperComposer(configService);
-        _wallpaperService = new WallpaperService(composer, _desktop);
+        _wallpaperService = new WallpaperService(composer, _desktop, shouldDefer: () => configService.Load().PauseDuringFullscreen && FullscreenDetector.IsFullscreenAppInForeground());
 
         // Client HTTP partagé des sources web. User-Agent explicite : certaines API
         // (e621 notamment) rejettent les clients sans identification.
