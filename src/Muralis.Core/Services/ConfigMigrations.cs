@@ -95,8 +95,6 @@ public static class ConfigMigrations
                 source.RequestUrl = WallhavenUrlBuilder.SearchBaseUrl;
                 changed = true;
             }
-        }
-
             // V4: custom-source API keys move out of source objects into the DPAPI-protected
             // per-instance store. Never leave plaintext credentials in config.json.
             if (source.IsCustom && !string.IsNullOrWhiteSpace(source.ApiKey))
@@ -106,6 +104,7 @@ public static class ConfigMigrations
                 source.ApiKey = string.Empty;
                 changed = true;
             }
+        }
 
         foreach (var screen in config.Screens.Append(config.UnifiedConfig))
         {
