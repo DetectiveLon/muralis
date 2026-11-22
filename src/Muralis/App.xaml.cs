@@ -80,7 +80,7 @@ public partial class App : Application
         // (e621 notamment) rejettent les clients sans identification.
         // Version réelle + URL du projet (review s3). Connexions renouvelées toutes les 15 min :
         // une app qui tourne des semaines suit les changements DNS des API (review s6).
-        var http = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(15) })
+        var http = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(15), AllowAutoRedirect = false })
         {
             Timeout = TimeSpan.FromSeconds(30),
         };
