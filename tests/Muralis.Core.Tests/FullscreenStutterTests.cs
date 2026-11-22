@@ -62,6 +62,28 @@ public sealed class FullscreenStutterTests : IDisposable
     }
 
     [Fact]
+    public async Task PoseBatcher_RechecksFullscreenStateAtFinalApply()
+    {
+        bool inGame = true;
+        var applied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var batcher = new PoseBatcher(batch =>
+        {
+            foreach (var request in batch)
+                request.Succeed();
+            applied.TrySetResult();
+        }, TimeSpan.FromMilliseconds(30), () => inGame);
+
+        var pending = batcher.Enqueue(new PoseRequest("A", "a.png", DesktopWallpaperPosition.Fill));
+        await Task.Delay(150);
+        Assert.False(applied.Task.IsCompleted);
+        Assert.False(pending.IsCompleted);
+
+        inGame = false;
+        await pending.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.True(applied.Task.IsCompleted);
+    }
+
+    [Fact]
     public async Task SlideshowChange_WaitsForTheGameToEnd_WithoutStacking()
     {
         string folder = Path.Combine(_dir, "pics");
