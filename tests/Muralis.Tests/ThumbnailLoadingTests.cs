@@ -37,7 +37,7 @@ public sealed class ThumbnailLoadingTests : IDisposable
 
     private ScreenSettingsViewModel NewEditor()
     {
-        var sources = new SourcesViewModel(new ConfigService(Path.Combine(_dir, "data")));
+        var sources = new SourcesViewModel(new ConfigService(Path.Combine(_dir, "data")), new DpapiSecretProtector());
         return new ScreenSettingsViewModel(new ScreenConfig(), sources.EditorRandomOptions, sources.EditorDailyOptions);
     }
 
