@@ -174,7 +174,7 @@ public partial class App : Application
         // L'ancien graphe (bascule de langue) se désabonne des services, qui survivent (#49).
         _settingsViewModel?.Dispose();
         var appSettings = new AppSettingsViewModel(_configService!, _themeService!, _secrets!, () => _settingsWindow, ApplyLanguage);
-        var sources = new SourcesViewModel(_configService!);
+        var sources = new SourcesViewModel(_configService!, _secrets!);
         _settingsViewModel = new SettingsViewModel(_configService!, _desktop!, _wallpaperService!, _slideshowService!, _imageSaveService!, appSettings, sources);
     }
 
