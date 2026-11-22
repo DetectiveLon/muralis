@@ -40,7 +40,7 @@ jobs:
       - name: Build installer
         shell: pwsh
         run: |
-          $iscc = Join-Path $env:ProgramFiles(x86) "Inno Setup 6/ISCC.exe"
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6/ISCC.exe"
           if (!(Test-Path $iscc)) { throw "Inno Setup compiler not found: $iscc" }
           Push-Location installer
           try { & $iscc "Muralis.iss"; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
